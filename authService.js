@@ -83,6 +83,6 @@ authService.get('/verify', function(req, res) {
   }
 });
 
-authService.listen(3000, function () {
+authService.listen(process.env.PORT || 3000, function () {
     return console.log("Started user authentication server listening on port 3000");
 });
