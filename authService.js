@@ -2,55 +2,70 @@ const express = require("express");
 const jwt = require('jsonwebtoken');
 const sqlite = require('sqlite3');
 const crypto = require('crypto');
-const { query } = require("express");
 
 var authService = express();
 
 //To change to a more secure version
 const KEY = "secret key";
 
-var db = new sqlite.Database("users.sqlite3");
+var MongoClient = require('mongodb').MongoClient;
+var url = "mongodb+srv://admin:admin@cluster0.uf5pu.mongodb.net/AuthServiceDB?retryWrites=true&w=majority";
 
-db.run(`CREATE TABLE IF NOT EXISTS users(
-  id INTEGER PRIMARY KEY,
-  username TEXT NOT NULL,
-  password TEXT NOT NULL
-)`);
+let dbConnection;
+
+MongoClient.connect(url,function (err, db) {
+    if (err) throw err;
+
+    dbConnection = db.db("AuthServiceDB");
+    console.log("Successfully connected to MongoDB.");
+});
 
 authService.post('/signup', express.urlencoded(),function(req, res) {
   var password = crypto.createHash('sha256').update(req.body.password).digest('hex');
-  db.get("SELECT FROM users WHERE username = ?", [req.body.username], function(err, row) {
-    if(row != undefined ) {
-      console.error("can't create user " + req.body.username);
-      res.status(409);
-    res.send("A user with that username already exists");
-    } else {
-      console.log("Can create user " + req.body.username);
-      db.run('INSERT INTO users(username, password) VALUES (?, ?)', [req.body.username, password]);
-      res.status(201);
-      res.send("Success");
-    }
-  });
+  var alreadyExists = false;
+  dbConnection
+        .collection("users")
+        .find({username:req.body.username}).toArray(function (err, result) {
+            if (result.length) {
+              res.status(409);
+              res.send("A user with that username already exists");
+              alreadyExists = true;
+           } else {
+            console.log("Can create user " + req.body.username);
+            }
+          });
+  if(!alreadyExists){
+    dbConnection.collection("users").insertOne({'username':req.body.username, 'password':password},function (err, result) {
+      if (err) {
+      res.status(400).send("Error");
+      } else {
+        res.status(201);
+        res.send("Success");
+      }
+    })
+  }
+          
 });
 
 authService.post('/signin', express.urlencoded(),function(req, res) {
   console.log(req.body.username + " attempted login");
   var password = crypto.createHash('sha256').update(req.body.password).digest('hex');
-  db.get("SELECT * FROM users WHERE (username, password) = (?, ?)", [req.body.username, password], function(err, row) {
-    if(row != undefined ) {
-      var payload = {
-        username: req.body.username,
-      };
-
-      var token = jwt.sign(payload, KEY, {algorithm: 'HS256', expiresIn: "15d"});
-      console.log("Success");
-      res.send(token);
-    } else {
-      console.error("Failure");
-      res.status(401)
-      res.send("There's no user matching that");
-    }
-  });
+  dbConnection.collection("users")
+        .find({username:req.body.username,password:password}).toArray(function (err, result) {
+            if (result.length) {
+              var payload = {
+                username: req.body.username,
+              };
+        
+              var token = jwt.sign(payload, KEY, {algorithm: 'HS256', expiresIn: "15d"});
+              console.log("Success");
+              res.send(token);
+           } else {
+            console.error("Failure");
+            res.status(401)
+            res.send("There's no user matching that");
+            }
+          });
 });
 
 authService.get('/verify', function(req, res) {
